@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>知识点阅读器</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -310,6 +312,34 @@
             margin: 30px 0;
         }
         
+        .katex-display {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 8px 0;
+            margin: 16px 0;
+            display: block;
+            text-align: center;
+        }
+        
+        .katex {
+            font-size: 1.1em;
+        }
+        
+        .formula-block {
+            background: #fafafa;
+            border-left: 4px solid #667eea;
+            padding: 16px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        
+        .formula-inline {
+            display: inline-block;
+            padding: 0 2px;
+        }
+        
         .page-indicator {
             position: fixed;
             bottom: 20px;
@@ -494,6 +524,119 @@
             
             container.innerHTML = `<div class="article-content">${html}</div>`;
             container.scrollTop = 0;
+            
+            setTimeout(() => renderMathFormulas(container), 10);
+        }
+        
+        function renderMathFormulas(container) {
+            if (!window.katex) {
+                console.warn('KaTeX library not loaded');
+                return;
+            }
+            
+            const articleContent = container.querySelector('.article-content');
+            if (!articleContent) return;
+            
+            const textNodes = [];
+            
+            function walk(element) {
+                element.childNodes.forEach(node => {
+                    if (node.nodeType === Node.TEXT_NODE) {
+                        if (node.textContent && (node.textContent.includes('$') || node.textContent.includes('\\(') || node.textContent.includes('\\['))) {
+                            textNodes.push(node);
+                        }
+                    } else if (node.nodeType === Node.ELEMENT_NODE) {
+                        const tag = node.tagName.toLowerCase();
+                        if (tag === 'pre' || tag === 'code' || tag === 'script' || tag === 'style') {
+                            return;
+                        }
+                        walk(node);
+                    }
+                });
+            }
+            
+            walk(articleContent);
+            
+            textNodes.forEach(textNode => {
+                const text = textNode.textContent;
+                let hasFormula = false;
+                
+                const displayRegex = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]/g;
+                const inlineRegex = /\$([^$\n]+?)\$|\\\(([^)]+?)\\\)/g;
+                
+                let result = [];
+                let lastIndex = 0;
+                let match;
+                
+                const allFormulas = [];
+                
+                while ((match = displayRegex.exec(text)) !== null) {
+                    allFormulas.push({
+                        start: match.index,
+                        end: match.index + match[0].length,
+                        formula: match[1] || match[2],
+                        display: true
+                    });
+                }
+                
+                while ((match = inlineRegex.exec(text)) !== null) {
+                    const insideDisplay = allFormulas.some(f => match.index >= f.start && match.index + match[0].length <= f.end);
+                    if (!insideDisplay) {
+                        allFormulas.push({
+                            start: match.index,
+                            end: match.index + match[0].length,
+                            formula: match[1] || match[2],
+                            display: false
+                        });
+                    }
+                }
+                
+                allFormulas.sort((a, b) => a.start - b.start);
+                
+                if (allFormulas.length === 0) return;
+                
+                const fragment = document.createDocumentFragment();
+                
+                allFormulas.forEach((formulaInfo, idx) => {
+                    if (formulaInfo.start > lastIndex) {
+                        fragment.appendChild(document.createTextNode(text.substring(lastIndex, formulaInfo.start)));
+                    }
+                    
+                    try {
+                        const formulaHtml = katex.renderToString(formulaInfo.formula.trim(), {
+                            throwOnError: false,
+                            displayMode: formulaInfo.display,
+                            strict: false,
+                            trust: true
+                        });
+                        
+                        if (formulaInfo.display) {
+                            const div = document.createElement('div');
+                            div.className = 'formula-block';
+                            div.innerHTML = formulaHtml;
+                            fragment.appendChild(div);
+                        } else {
+                            const span = document.createElement('span');
+                            span.className = 'formula-inline';
+                            span.innerHTML = formulaHtml;
+                            fragment.appendChild(span);
+                        }
+                        hasFormula = true;
+                    } catch (e) {
+                        fragment.appendChild(document.createTextNode(match[0]));
+                    }
+                    
+                    lastIndex = formulaInfo.end;
+                });
+                
+                if (lastIndex < text.length) {
+                    fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+                }
+                
+                if (hasFormula) {
+                    textNode.parentNode.replaceChild(fragment, textNode);
+                }
+            });
         }
         
         function renderChapterList() {
